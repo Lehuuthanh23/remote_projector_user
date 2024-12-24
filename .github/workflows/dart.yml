@@ -8,35 +8,56 @@ jobs:
     name: 🎉 iOS Build
     runs-on: macos-latest
     steps:
+      # 1. Checkout code
       - uses: actions/checkout@v3
 
+      # 2. Set up Flutter
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           architecture: x64
-      - run: flutter pub get
-      
 
-      - run: pod repo update
+      # 3. Install Flutter dependencies
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      # 4. Patch velocity_x (if needed)
+      - name: Patch velocity_x
+        run: |
+          sed -i '' 's/CardThemeData/CardTheme/g' ~/.pub-cache/hosted/pub.dev/velocity_x-*/lib/src/flutter/universal.dart
+
+      # 5. Update CocoaPods repo
+      - name: Update CocoaPods
+        run: pod repo update
         working-directory: ios
 
-      - run: flutter build ios --release --no-codesign
+      # 6. Set up Code Signing
+      - name: Set up Code Signing
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "${{ secrets.APP_STORE_CONNECT_PROFILE }}" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+          echo "${{ secrets.APP_STORE_CONNECT_CERTIFICATE }}" | base64 --decode > certificate.p12
+          security import certificate.p12 -P "${{ secrets.APP_STORE_CONNECT_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
 
-      - run: mkdir Payload
-        working-directory: build/ios/iphoneos
+      # 7. Build iOS app
+      - name: Build iOS app
+        run: flutter build ios --release
 
-      - run: mv Runner.app/ Payload
-        working-directory: build/ios/iphoneos
+      # 8. Export .ipa file
+      - name: Export .ipa
+        run: |
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/ios/iphoneos/Runner.xcarchive \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -exportPath build/ios/ipa
 
-      - name: Zip output
-        run: zip -qq -r -9 FlutterIpaExport.ipa Payload
-        working-directory: build/ios/iphoneos
-
+      # 9. Upload .ipa to GitHub release
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: build/ios/iphoneos/FlutterIpaExport.ipa
+          file: build/ios/ipa/Runner.ipa
           tag: v1.0
           overwrite: true
-          body: "This is first release"
+          body: "This is the first release of the app"
